@@ -19,6 +19,7 @@ test('frontend gateway and conversation reducer work with the actual backend', a
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'web-backend-integration-'));
   let modelCalls = 0;
   let asrCalls = 0;
+  let translationCalls = 0;
   const model = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
@@ -29,6 +30,12 @@ test('frontend gateway and conversation reducer work with the actual backend', a
       assert.equal(body.stream, false);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ choices: [{ message: { content: '你好，验证语音输入。' }, finish_reason: 'stop' }] }));
+    }
+    if (body.stream === false && !body.tools) {
+      translationCalls++;
+      const source = JSON.parse(body.messages[1].content).text;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ choices: [{ message: { content: source.includes('这是接口测试回复') ? 'English reply.' : 'English input.' }, finish_reason: 'stop' }] }));
     }
     modelCalls++;
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
@@ -86,12 +93,16 @@ test('frontend gateway and conversation reducer work with the actual backend', a
   const body = { client_message_id: 'web-integration-1', text: appendTranscript('已有草稿。', recognized.text) };
   await post(`/sessions/${session.id}/messages`, body);
   await reading;
+  while (backend.backend.store.data.print_segments.some(s => s.status !== 'ready')) {
+    controller.signal.throwIfAborted(); await new Promise(resolve => setTimeout(resolve, 10));
+  }
   assert.equal(state.messages[0].text, body.text);
   assert.equal(state.messages.at(-1).text, '这是接口测试回复，不是实际模型生成。');
   assert.equal(state.activeRequest, null);
   assert.equal(backend.backend.store.data.jobs.length, 0);
   assert.equal((await post(`/sessions/${session.id}/messages`, body)).duplicate, true);
   assert.equal(modelCalls, 1);
+  assert.equal(translationCalls, 2);
   const snapshot = await (await fetch(`${base}/sessions/${session.id}`, { signal: controller.signal })).json();
   assert.deepEqual(applyEvent(initialConversation, { type: 'snapshot', data: snapshot }).messages, state.messages);
   const replay = await fetch(`${base}/sessions/${session.id}/events`, { signal: controller.signal, headers: { 'Last-Event-ID': 'expired' } });
@@ -102,4 +113,46 @@ test('frontend gateway and conversation reducer work with the actual backend', a
     break;
   }
   assert.ok(lastEventId);
+  const info = await (await fetch(base + '/status', { signal: controller.signal })).json();
+  assert.equal(info.device.device_id, 'typewriter');
+  assert.equal(info.device.connection, 'not_connected');
+  const deviceResponse = await fetch(base + '/devices/typewriter/events', { signal: controller.signal });
+  const deviceEvents = (async () => {
+    for await (const data of sseData(deviceResponse.body)) {
+      const event = JSON.parse(data);
+      if (event.type === 'snapshot') assert.equal(event.data.connection, 'not_connected');
+      if (event.type === 'device.updated') { assert.equal(event.data.connection, 'connected'); return; }
+    }
+    assert.fail('Device connection event was not delivered');
+  })();
+  const connected = await fetch(`http://127.0.0.1:${backend.server.address().port}/api/v1/devices/typewriter/connect`, {
+    method: 'POST', headers: { Authorization: 'Bearer integration-device', 'Content-Type': 'application/json' }, body: JSON.stringify({ capabilities: {} }), signal: controller.signal,
+  });
+  assert.equal(connected.status, 200); await connected.json();
+  await deviceEvents;
+  const deviceSnapshot = await (await fetch(base + '/devices/typewriter', { signal: controller.signal })).json();
+  assert.equal(deviceSnapshot.connection, 'connected');
+  assert.equal(backend.backend.store.data.jobs.length, 0);
+  const queue = await (await fetch(base + '/devices/typewriter/print-queue', { signal: controller.signal })).json();
+  assert.equal(queue.pending_turns, 1);
+  assert.equal(queue.state, 'waiting_capabilities');
+  const deviceBase = `http://127.0.0.1:${backend.server.address().port}/api/v1/devices/typewriter`;
+  async function devicePost(route, body) {
+    const response = await fetch(deviceBase + route, { method: 'POST', headers: { Authorization: 'Bearer integration-device', 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal });
+    assert.equal(response.status, 200); return response.json();
+  }
+  const device = await devicePost('/connect', { capabilities: { charset: 'ascii', max_chars: 4000, supports_newline: true, print_completed: true } });
+  async function command() {
+    const response = await fetch(deviceBase + '/commands', { headers: { Authorization: 'Bearer integration-device', 'X-Connection-ID': device.connection_id }, signal: controller.signal });
+    assert.equal(response.status, 200); return response.json();
+  }
+  const first = await command();
+  assert.equal(first.text, 'TURN 0001\nYOU:\nEnglish input.\n\n');
+  await devicePost(`/print-jobs/${first.job_id}/events`, { connection_id: device.connection_id, status: 'failed' });
+  const resolved = await post(`/devices/typewriter/print-jobs/${first.job_id}/resolve`, { action: 'confirm_completed' });
+  assert.notEqual(resolved.print_queue.state, 'needs_confirmation');
+  const second = await command();
+  assert.equal(second.text, 'THEM:\nEnglish reply.\n\n');
+  await devicePost(`/print-jobs/${second.job_id}/events`, { connection_id: device.connection_id, status: 'completed' });
+  assert.equal((await (await fetch(base + '/devices/typewriter/print-queue', { signal: controller.signal })).json()).pending_turns, 0);
 });

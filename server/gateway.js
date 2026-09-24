@@ -7,9 +7,14 @@ export function conversationGateway({ target, token }) {
   if (!['http:', 'https:'].includes(upstream.protocol) || upstream.username || upstream.password) {
     throw new Error('BACKEND_URL must be an HTTP(S) origin');
   }
+  console.info('[gateway.configured]', { upstream: upstream.origin, credential_configured: !!token });
   function middleware(req, res, next) {
     if (!req.url?.startsWith('/api/')) return next();
+    const started = Date.now();
+    const requestPath = req.url.split('?')[0];
+    res.on('finish', () => console.info('[gateway.http]', { method: req.method, path: requestPath, status: res.statusCode, ms: Date.now() - started }));
     const error = (status, code) => {
+      console.warn('[gateway.failed]', { method: req.method, path: requestPath, status, code });
       if (res.destroyed || res.writableEnded) return;
       if (res.headersSent) return res.destroy();
       res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -21,9 +26,12 @@ export function conversationGateway({ target, token }) {
     } catch { return error(403, 'ORIGIN_DENIED'); }
     const url = new URL(req.url, 'http://localhost');
     const isTranscription = req.method === 'POST' && url.pathname === '/api/v1/audio/transcriptions';
+    const isStatus = req.method === 'GET' && (url.pathname === '/api/v1/status' || /^\/api\/v1\/devices\/[a-zA-Z0-9_-]+(?:\/(?:events|print-queue))?$/.test(url.pathname));
+    const isResolution = req.method === 'POST' && /^\/api\/v1\/devices\/[a-zA-Z0-9_-]+\/print-jobs\/[a-zA-Z0-9_-]+\/resolve$/.test(url.pathname);
+    const isRecovery = req.method === 'POST' && /^\/api\/v1\/devices\/[a-zA-Z0-9_-]+\/recover$/.test(url.pathname);
     const allowed = req.method === 'POST'
-      ? isTranscription || /^\/api\/v1\/sessions(?:\/[a-zA-Z0-9_-]+\/messages)?$/.test(url.pathname)
-      : req.method === 'GET' && /^\/api\/v1\/sessions\/[a-zA-Z0-9_-]+(?:\/events)?$/.test(url.pathname);
+      ? isTranscription || isResolution || isRecovery || /^\/api\/v1\/sessions(?:\/[a-zA-Z0-9_-]+\/messages)?$/.test(url.pathname)
+      : isStatus || (req.method === 'GET' && /^\/api\/v1\/sessions\/[a-zA-Z0-9_-]+(?:\/events)?$/.test(url.pathname));
     if (!allowed || url.search) return error(404, 'NOT_FOUND');
     if (!token) return error(503, 'BACKEND_NOT_CONFIGURED');
     const headers = { Authorization: `Bearer ${token}` };
@@ -33,15 +41,17 @@ export function conversationGateway({ target, token }) {
     const client = (upstream.protocol === 'https:' ? https : http).request(new URL(url.pathname, upstream), {
       method: req.method, headers,
     }, incoming => {
+      if (incoming.headers['content-type']?.includes('text/event-stream')) console.info('[gateway.sse.open]', { path: requestPath });
       res.writeHead(incoming.statusCode, {
         'Content-Type': incoming.headers['content-type'] || 'application/json',
         'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no',
+        ...(incoming.headers['x-request-id'] ? { 'X-Request-ID': incoming.headers['x-request-id'] } : {}),
       });
-      incoming.on('error', () => res.destroy());
+      incoming.on('error', error => { console.warn('[gateway.upstream_stream_failed]', { path: requestPath, code: error.code }); res.destroy(); });
       incoming.pipe(res);
     });
     client.setTimeout(isTranscription ? 135000 : 30000, () => { error(504, isTranscription ? 'ASR_TIMEOUT' : 'BACKEND_UNAVAILABLE'); client.destroy(); });
-    client.on('error', () => error(502, 'BACKEND_UNAVAILABLE'));
+    client.on('error', cause => { console.warn('[gateway.connection_failed]', { path: requestPath, code: cause.code }); error(502, 'BACKEND_UNAVAILABLE'); });
     req.on('aborted', () => client.destroy());
     res.on('close', () => client.destroy());
     req.pipe(client);

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { applyEvent, initialConversation, nextAttempt, errorText } from '../src/chat.js';
+import { applyEvent, initialConversation, nextAttempt, errorText, activeActivity, exportConversation } from '../src/chat.js';
 import { conversationGateway } from '../server/gateway.js';
 
 test('conversation stream preserves text and terminal states across snapshots and late events', () => {
@@ -72,12 +72,24 @@ test('gateway keeps credentials server-side, limits endpoints, rejects foreign o
   assert.equal(events.headers.get('content-type'), 'text/event-stream');
   assert.match(await events.text(), /你好/);
   assert.equal(received[1].headers['last-event-id'], 'previous');
-  for (const route of ['/api/v1/status', '/api/v1/devices/typewriter', '/api/v1/sessions/a?token=x']) {
+  for (const route of ['/api/v1/devices/typewriter/commands', '/api/v1/devices/typewriter/heartbeat', '/api/v1/sessions/a?token=x']) {
     const denied = await fetch(base + route); assert.equal(denied.status, 404); await denied.text();
   }
   const foreign = await fetch(base + '/api/v1/sessions', { method: 'POST', headers: { Origin: 'http://evil.example' }, body: '{}' });
   assert.equal(foreign.status, 403); await foreign.text();
   assert.equal(received.length, 2);
+  for (const route of ['/api/v1/status', '/api/v1/devices/typewriter', '/api/v1/devices/typewriter/events', '/api/v1/devices/typewriter/print-queue']) {
+    const allowed = await fetch(base + route); assert.equal(allowed.status, 200); await allowed.text();
+  }
+  const write = await fetch(base + '/api/v1/devices/typewriter/input', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  assert.equal(write.status, 404); await write.text();
+  const resolve = await fetch(base + '/api/v1/devices/typewriter/print-jobs/job-1/resolve', { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: '{"action":"retry"}' });
+  assert.equal(resolve.status, 200); await resolve.text();
+  assert.equal(received.at(-1).headers.authorization, 'Bearer server-only-secret');
+  assert.equal(received.length, 7);
+  const recovery = await fetch(base + '/api/v1/devices/typewriter/recover', { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: '{}' });
+  assert.equal(recovery.status, 200); await recovery.text();
+  assert.equal(received.at(-1).headers.authorization, 'Bearer server-only-secret');
 });
 
 test('unconfigured gateway returns a controlled service error', async t => {

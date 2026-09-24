@@ -10,7 +10,11 @@ export default defineConfig(({ mode }) => {
   const target = process.env.BACKEND_URL || local.BACKEND_URL || 'http://127.0.0.1:3000';
   return {
     plugins: [react(), conversationGateway({ target, token })],
-    server: { port: 5173, strictPort: true },
+    server: {
+      port: 5173,
+      strictPort: true,
+      allowedHosts: ['wages-habits-memo-standards.trycloudflare.com'],
+    },
     preview: { port: 4173, strictPort: true },
   };
 });

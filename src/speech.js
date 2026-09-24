@@ -72,7 +72,7 @@ export async function recordAudio(signal, onStarted) {
       recorder.onerror = () => reject(failure('RECORDING_FAILED'));
       recorder.onstart = () => {
         timer = setTimeout(stop, RECORDING_LIMIT_MS);
-        onStarted(stop);
+        onStarted(stop, stream);
       };
       recorder.onstop = () => size ? resolve(new Blob(chunks, { type: recorder.mimeType || mimeType })) : reject(failure('ASR_EMPTY_AUDIO'));
       recorder.start(1000);
