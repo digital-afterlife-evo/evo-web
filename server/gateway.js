@@ -28,9 +28,8 @@ export function conversationGateway({ target, token }) {
     const isTranscription = req.method === 'POST' && url.pathname === '/api/v1/audio/transcriptions';
     const isStatus = req.method === 'GET' && (url.pathname === '/api/v1/status' || /^\/api\/v1\/devices\/[a-zA-Z0-9_-]+(?:\/(?:events|print-queue))?$/.test(url.pathname));
     const isResolution = req.method === 'POST' && /^\/api\/v1\/devices\/[a-zA-Z0-9_-]+\/print-jobs\/[a-zA-Z0-9_-]+\/resolve$/.test(url.pathname);
-    const isRecovery = req.method === 'POST' && /^\/api\/v1\/devices\/[a-zA-Z0-9_-]+\/recover$/.test(url.pathname);
     const allowed = req.method === 'POST'
-      ? isTranscription || isResolution || isRecovery || /^\/api\/v1\/sessions(?:\/[a-zA-Z0-9_-]+\/messages)?$/.test(url.pathname)
+      ? isTranscription || isResolution || /^\/api\/v1\/sessions(?:\/[a-zA-Z0-9_-]+\/messages)?$/.test(url.pathname)
       : isStatus || (req.method === 'GET' && /^\/api\/v1\/sessions\/[a-zA-Z0-9_-]+(?:\/events)?$/.test(url.pathname));
     if (!allowed || url.search) return error(404, 'NOT_FOUND');
     if (!token) return error(503, 'BACKEND_NOT_CONFIGURED');

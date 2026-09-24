@@ -38,8 +38,7 @@ test('both scenes render with real component imports and honest disconnected sta
   assert.doesNotMatch(room, /机器正在打印|正在听你说/);
   const faultRoom = renderToStaticMarkup(React.createElement(Conversation, { ...props, service: { ...service, status: { device: { connection: 'connected', board: { websocket_connected: true, host_state: 'fault' } } } } }));
   assert.match(faultRoom, /打字机接口故障，外接键盘已暂停/);
-  assert.match(faultRoom, /恢复打字机/);
-  assert.match(faultRoom, /连接诊断/);
+  assert.match(faultRoom, /RST/);
   assert.doesNotMatch(faultRoom, /status-dot is-connected|实体设备未连接/);
   const queue = { state: 'needs_confirmation', pending_turns: 2, head: { turn_number: 3, role: 'you' }, current_job: { id: 'job', turn_number: 3, role: 'you', part_index: 2, part_count: 4 } };
   const queuedProps = { ...props, service: { ...service, status: { device: { connection: 'connected', print_queue: queue } }, resolvePrint() {} } };

@@ -87,9 +87,6 @@ test('gateway keeps credentials server-side, limits endpoints, rejects foreign o
   assert.equal(resolve.status, 200); await resolve.text();
   assert.equal(received.at(-1).headers.authorization, 'Bearer server-only-secret');
   assert.equal(received.length, 7);
-  const recovery = await fetch(base + '/api/v1/devices/typewriter/recover', { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: '{}' });
-  assert.equal(recovery.status, 200); await recovery.text();
-  assert.equal(received.at(-1).headers.authorization, 'Bearer server-only-secret');
 });
 
 test('unconfigured gateway returns a controlled service error', async t => {

@@ -8,8 +8,6 @@ export function useStatus(enabled) {
   const [attempt, setAttempt] = useState(0);
   const [resolving, setResolving] = useState(false);
   const [resolveError, setResolveError] = useState('');
-  const [recovering, setRecovering] = useState(false);
-  const [recoveryNotice, setRecoveryNotice] = useState('');
   useEffect(() => {
     if (!enabled) return;
     let disposed = false, stream, sequence = -1, lastState = '';
@@ -57,18 +55,5 @@ export function useStatus(enabled) {
       setResolving(false); setAttempt(value => value + 1);
     }
   }
-  async function recoverDevice() {
-    if (recovering || !status?.device?.device_id) return;
-    setRecovering(true); setRecoveryNotice('');
-    try {
-      await api(`/devices/${status.device.device_id}/recover`, {});
-      setRecoveryNotice('已请求恢复，正在同步设备状态。');
-    } catch (error) {
-      setRecoveryNotice(error.status === 404 ? '请重启后端 start.cmd，加载恢复接口。'
-        : error.code === 'BOARD_HOST_UPDATE_REQUIRED' ? '请重启 board/start.cmd，加载安全恢复功能。'
-          : error.code === 'BOARD_NOT_FAULTED' ? '当前设备不满足恢复条件，正在刷新状态。'
-            : '恢复暂未确认，请检查上位机和 USB 连接，再查看最新状态。');
-    } finally { setRecovering(false); setAttempt(value => value + 1); }
-  }
-  return { status, error, loading, resolving, resolveError, resolvePrint, recovering, recoveryNotice, recoverDevice, refresh() { setAttempt(value => value + 1); } };
+  return { status, error, loading, resolving, resolveError, resolvePrint, refresh() { setAttempt(value => value + 1); } };
 }

@@ -11,7 +11,6 @@ const printStates = {
 export default function StatusPanel({ chat, service }) {
   const device = service.status?.device;
   const activity = activeActivity(chat.activities);
-  const board = device?.board;
   const faulted = device?.board?.websocket_connected && device?.board?.host_state === 'fault';
   const connected = device?.connection === 'connected' && !service.error && !faulted;
   const queue = device?.print_queue;
@@ -20,26 +19,14 @@ export default function StatusPanel({ chat, service }) {
     const message = action === 'retry' ? '这一块可能已经打印过。重新打印会从该块开头开始，可能重复落纸。确认重新打印？' : '请先核对纸面：这一块是否已经完整打印？确认后将继续后续内容。';
     if (window.confirm(message)) service.resolvePrint(uncertain.id, action);
   }
-  function recover() {
-    if (window.confirm('请先确认打字机已切到 Online、纸张已装好且没有卡纸。恢复后可能继续打印排队内容；结果不明的任务仍需单独核对。确认恢复？')) service.recoverDevice();
-  }
   return <div className="status-panel">
     <div className="panel-heading"><span className="eyebrow">THE OTHER SIDE</span></div>
     <section className="device-observation">
       <div className="device-illustration" aria-hidden="true"><img src="/design/typewriter.webp" alt="" width="1313" height="1011" /></div>
       <h2>另一端的打字机</h2>
       <p className="connection-state"><span className={`status-dot ${connected ? 'is-connected' : ''}`} />{service.loading ? '正在连接服务' : service.error ? '连接状态暂不可用' : faulted ? '打字机接口故障，外接键盘已暂停' : connected ? '设备已连接' : '实体设备未连接'}</p>
-      <button className="quiet-link" onClick={service.refresh} disabled={service.loading}>检查连接</button>
-      {faulted && !service.error && <button className="quiet-link" style={{ marginLeft: 18 }} onClick={recover} disabled={service.recovering}>{service.recovering ? '正在请求恢复…' : '恢复打字机'}</button>}
-      {board && <details className="activity-history"><summary>连接诊断</summary>
-        <p className="print-detail">上位机 HTTP：{board.host_connected === undefined ? '需重启后端更新诊断' : board.host_connected ? '已连接' : '不可达，请启动 board/start.cmd'}</p>
-        <p className="print-detail">WebSocket：{board.websocket_connected ? '已连接' : '未连接，请检查上位机 8766 端口'}</p>
-        <p className="print-detail">串口：{board.port || '未获取'} · {board.serial_connected ? '已打开' : '未确认，请检查 USB 与串口号'}</p>
-        <p className="print-detail">ESP32：{board.device_name || '未识别'} · 状态 {board.host_state}{board.device_seen_at ? ` · 最近通信 ${new Date(board.device_seen_at).toLocaleTimeString()}` : ''}</p>
-        {board.device_error && <p className="print-detail">设备错误：{board.device_error}</p>}
-        {board.error && <p className="print-detail">连接诊断码：{board.error}</p>}
-      </details>}
-      {service.recoveryNotice && <p className="print-detail" role="status">{service.recoveryNotice}</p>}
+      {faulted && !service.error && <p className="print-detail">停止当前输出后，保持打字机 Online，按 ESP32 的 RST；若仍未恢复，再重启上位机。</p>}
+      {service.error && <button className="quiet-link" onClick={service.refresh}>重新连接</button>}
     </section>
     <section className="current-observation"><div className="panel-section-title"><h3>此刻的对话</h3><span>LIVE</span></div><p className="current-action">{chat.connectionError ? '连接暂时中断，回复状态待确认' : chat.creating ? '正在翻开新的一页' : chat.loading ? '正在恢复对话' : activity?.summary || (chat.activeRequest ? '正在组织回答' : chat.problem ? '本轮对话未完成' : '等待你的下一句话')}</p>
       {!!chat.activities.length && <details className="activity-history"><summary>查看本轮过程 <span aria-hidden="true">＋</span></summary><ol>{chat.activities.slice(-12).map(item => <li key={item.id}><span className={`activity-marker ${item.activity_status}`} /><div><p>{item.summary}</p><span>{item.activity_status === 'running' ? '进行中' : item.activity_status === 'failed' ? '未完成' : '已完成'}</span></div></li>)}</ol></details>}
